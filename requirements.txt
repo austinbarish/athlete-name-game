@@ -1,0 +1,7 @@
+pandas
+numpy
+matplotlib
+altair
+seaborn
+streamlit
+click<=8.0.4

@@ -1,8 +1,10 @@
+# Imports
 import streamlit as st
 import pandas as pd
 import altair as alt
 import time
 from datetime import datetime
+import matplotlib.pyplot as plt
 
 # Initialize session state to hold athletes
 if "athletes" not in st.session_state:
@@ -31,45 +33,64 @@ def start_timer():
     )
 
 
-def display_final_tallies():
-    # Clear the screen
-    st.empty()
+# Function to create a summary image
+def create_summary(time_limit, total_count, league_counts, output_path="summary.png"):
+    if not league_counts.empty:
+        fig, ax = plt.subplots(figsize=(10, 6), dpi=300)
 
-    # Display final tallies
-    st.write("### Final Tallies:")
-    total_athletes = len(st.session_state.athletes)
-    st.write(f"Total athletes entered: {total_athletes}")
+        league_colors = {
+            "NFL": "#0000FF",
+            "NBA": "#FF0000",
+            "MLB": "#008000",
+            "WNBA": "#800080",
+            "Unverified": "#808080",
+        }
 
-    if total_athletes > 0:
-        all_players = pd.read_csv("./data/all_players.csv", index_col="id")
-        all_players.drop(columns=["api_id"], inplace=True)
-
-        athletes_in_list = all_players[
-            all_players["full_name"].isin(st.session_state.athletes)
-        ]
-        pct_verified = round((len(athletes_in_list) / total_athletes) * 100, 2)
-        st.write(
-            f"We could verify {len(athletes_in_list)}, or {pct_verified}% athletes in the list."
+        # Top section: Display the time limit and total count
+        ax.text(
+            0.5,
+            1.2,
+            f"Time Limit: {time_limit} minutes",
+            fontsize=16,
+            ha="center",
+            transform=ax.transAxes,
+            color="blue",
+        )
+        ax.text(
+            0.5,
+            1.1,
+            f"Total Athletes: {total_count}",
+            fontsize=16,
+            ha="center",
+            transform=ax.transAxes,
+            color="green",
         )
 
-        league_counts = (
-            athletes_in_list["league"]
-            .value_counts()
-            .reset_index()
-            .rename(columns={"index": "league", "league": "count"})
+        # Bar chart for league counts
+        league_counts["color"] = league_counts["league"].map(league_colors)
+        ax.barh(
+            league_counts["league"],
+            league_counts["count"],
+            color=league_counts["color"],
         )
-        st.write("Verified Athletes by League:")
-        st.write(league_counts)
+        ax.set_xlabel("Count", fontsize=14)
+        ax.set_title("Athlete Counts by League", fontsize=16)
 
-        unverified_athletes = [
-            athlete
-            for athlete in st.session_state.athletes
-            if athlete not in athletes_in_list["full_name"].values
-        ]
-        st.write(f"Unverified athletes ({len(unverified_athletes)}):")
-        st.write(unverified_athletes)
+        # Make x-axis ticks integers
+        ax.xaxis.set_major_locator(plt.MaxNLocator(integer=True))
+
+        # Annotate the bars with count values
+        for i, value in enumerate(league_counts["count"]):
+            ax.text(value + 0.5, i, str(value), va="center", fontsize=12)
+
+        # Adjust layout
+        plt.tight_layout()
+
+        # Save the image
+        plt.savefig(output_path, bbox_inches="tight")
+        plt.close()
     else:
-        st.write("No athletes were entered.")
+        st.write("No data to create summary")
 
 
 # Layout with two columns
@@ -97,9 +118,14 @@ with col1:
         all_players = pd.read_csv("./data/all_players.csv", index_col="id")
         all_players.drop(columns=["api_id"], inplace=True)
 
+        # Remove duplicates from all_players
+        all_players.drop_duplicates(subset="full_name", keep="first", inplace=True)
+
         # Verified and unverified athletes logic
         athletes_in_list = all_players[
-            all_players["full_name"].isin(st.session_state.athletes)
+            all_players["full_name"]
+            .str.lower()
+            .isin([athlete.lower() for athlete in st.session_state.athletes])
         ]
         pct_verified = round((len(athletes_in_list) / total_athletes) * 100, 2)
         st.write(
@@ -112,7 +138,7 @@ with col1:
         unverified_athletes = [
             athlete
             for athlete in st.session_state.athletes
-            if athlete not in athletes_in_list["full_name"].values
+            if athlete.lower() not in athletes_in_list["full_name"].str.lower().values
         ]
         unverified_df = pd.DataFrame(
             {"full_name": unverified_athletes, "league": "Unverified"}
@@ -145,7 +171,9 @@ with col1:
             .mark_bar()
             .encode(
                 x=alt.X(
-                    "count:N", title="Count", axis=alt.Axis(grid=False, labelAngle=0)
+                    "count:Q",
+                    title="Count",
+                    axis=alt.Axis(grid=False, labelAngle=0, tickMinStep=1, tickCount=5),
                 ),
                 y=alt.Y("league:N", title="League", sort="-x"),
                 color=alt.Color("color", scale=None),
@@ -202,4 +230,12 @@ with col2:
             "<p class='time'>Time's up!</p>", unsafe_allow_html=True
         )
 
-        display_final_tallies()
+        # Create final stats png with button to download
+        create_summary(st.session_state.time_limit, total_athletes, league_counts)
+        with open("summary.png", "rb") as file:
+            btn = st.download_button(
+                label="Download Summary",
+                data=file,
+                file_name="summary.png",
+                mime="image/png",
+            )

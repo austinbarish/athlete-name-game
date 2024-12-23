@@ -1,12 +1,18 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
-import asyncio
+import time
 from datetime import datetime
 
 # Initialize session state to hold athletes
 if "athletes" not in st.session_state:
     st.session_state.athletes = []
+
+if "timer_running" not in st.session_state:
+    st.session_state.timer_running = False
+
+if "end_time" not in st.session_state:
+    st.session_state.end_time = None
 
 
 # Function to add athlete to the list
@@ -17,9 +23,59 @@ def add_athlete():
         st.session_state.athlete_input = ""  # Clear input after adding
 
 
-# Layout with two columns
-col1, col2 = st.columns([3, 1])  # Adjust the column widths as needed
+# Function to start the timer
+def start_timer():
+    st.session_state.timer_running = True
+    st.session_state.end_time = datetime.now() + pd.Timedelta(
+        minutes=st.session_state.time_limit
+    )
 
+
+def display_final_tallies():
+    # Clear the screen
+    st.empty()
+
+    # Display final tallies
+    st.write("### Final Tallies:")
+    total_athletes = len(st.session_state.athletes)
+    st.write(f"Total athletes entered: {total_athletes}")
+
+    if total_athletes > 0:
+        all_players = pd.read_csv("./data/all_players.csv", index_col="id")
+        all_players.drop(columns=["api_id"], inplace=True)
+
+        athletes_in_list = all_players[
+            all_players["full_name"].isin(st.session_state.athletes)
+        ]
+        pct_verified = round((len(athletes_in_list) / total_athletes) * 100, 2)
+        st.write(
+            f"We could verify {len(athletes_in_list)}, or {pct_verified}% athletes in the list."
+        )
+
+        league_counts = (
+            athletes_in_list["league"]
+            .value_counts()
+            .reset_index()
+            .rename(columns={"index": "league", "league": "count"})
+        )
+        st.write("Verified Athletes by League:")
+        st.write(league_counts)
+
+        unverified_athletes = [
+            athlete
+            for athlete in st.session_state.athletes
+            if athlete not in athletes_in_list["full_name"].values
+        ]
+        st.write(f"Unverified athletes ({len(unverified_athletes)}):")
+        st.write(unverified_athletes)
+    else:
+        st.write("No athletes were entered.")
+
+
+# Layout with two columns
+col1, col2 = st.columns([3, 1])
+
+# Main col
 with col1:
     # Display entered athletes as a numbered list
     st.write("### Entered Athletes:")
@@ -35,134 +91,115 @@ with col1:
     total_athletes = len(st.session_state.athletes)
     st.write(f"Total athletes entered: {total_athletes}")
 
-    # Validate input
-    if total_athletes == 0:
-        st.write("Please enter at least one athlete")
-    else:
+    # Display verified and unverified athletes
+    if total_athletes > 0:
         # Import list of athletes from all_players.csv
         all_players = pd.read_csv("./data/all_players.csv", index_col="id")
-
-        # Drop api_id column
         all_players.drop(columns=["api_id"], inplace=True)
 
-        # Get the athletes that are in the list
+        # Verified and unverified athletes logic
         athletes_in_list = all_players[
             all_players["full_name"].isin(st.session_state.athletes)
         ]
-
-        # Calculate percentage of verified athletes
         pct_verified = round((len(athletes_in_list) / total_athletes) * 100, 2)
         st.write(
             f"We could verify {len(athletes_in_list)}, or {pct_verified}% athletes in the list"
         )
-
-        # Print the athletes that are in the list
         st.write("Verified athletes:")
         st.write(athletes_in_list)
 
-        # Identify unverified athletes
+        # Create a DataFrame of unverified athletes
         unverified_athletes = [
             athlete
             for athlete in st.session_state.athletes
             if athlete not in athletes_in_list["full_name"].values
         ]
-
-        # Add unverified athletes to a dataframe with a league of "Unverified"
         unverified_df = pd.DataFrame(
             {"full_name": unverified_athletes, "league": "Unverified"}
         )
-
-        # Combine verified and unverified athletes
         named_athletes = pd.concat([athletes_in_list, unverified_df], ignore_index=True)
-
-        # Print the athletes that are not in the list
         st.write("Unverified athletes:")
-        st.write(unverified_athletes)
+        st.write(
+            pd.DataFrame(
+                unverified_athletes,
+                columns=["Guess"],
+                index=range(1, len(unverified_athletes) + 1),
+            )
+        )
 
-        # Get league counts and sort by counts in descending order
+        # Create a bar chart of athlete counts by league
         league_counts = named_athletes["league"].value_counts().reset_index()
         league_counts.columns = ["league", "count"]
-        league_counts.sort_values(
-            by="count", ascending=False, inplace=True
-        )  # Sort by count
-
-        # Define colors for each league
         league_colors = {
-            "NFL": "#0000FF",  # blue
-            "NBA": "#FF0000",  # red
-            "MLB": "#008000",  # green
-            "WNBA": "#800080",  # purple
-            "Unverified": "#808080",  # gray
+            "NFL": "#0000FF",
+            "NBA": "#FF0000",
+            "MLB": "#008000",
+            "WNBA": "#800080",
+            "Unverified": "#808080",
         }
-
-        # Map colors to league_counts
         league_counts["color"] = league_counts["league"].map(league_colors)
 
-        # Create a larger bar chart with the league counts
+        # Create the bar chart
         bar_chart = (
             alt.Chart(league_counts)
             .mark_bar()
             .encode(
-                x=alt.X("count:Q", title="Count"),  # X-axis is counts
-                y=alt.Y(
-                    "league:N",
-                    title="League",
-                    sort="-x",
-                ),  # Y-axis is leagues sorted by count
-                color=alt.Color("color", scale=None),  # Keep color for bars
+                x=alt.X(
+                    "count:N", title="Count", axis=alt.Axis(grid=False, labelAngle=0)
+                ),
+                y=alt.Y("league:N", title="League", sort="-x"),
+                color=alt.Color("color", scale=None),
                 tooltip=[
                     alt.Tooltip("league:N", title="League:"),
-                    alt.Tooltip("count:Q", title="Count:"),
+                    alt.Tooltip("count:N", title="Count:"),
                 ],
             )
-            .properties(
-                title="Athlete Counts by League",
-                width=800,  # Set the width of the chart
-                height=400,  # Set the height of the chart
-            )
+            .properties(title="Athlete Counts by League", width=800, height=400)
         )
-
         st.altair_chart(bar_chart)
 
 with col2:
+    # Styling for the timer
     st.markdown(
         """
-    <style>
-    .time {
-        font-size: 20px !important;
-        font-weight: 700 !important;
-        color: #ec5953 !important;
-    }
-    </style>
-    """,
+        <style>
+        .time {
+            font-size: 20px !important;
+            font-weight: 700 !important;
+            color: #ec5953 !important;
+        }
+        </style>
+        """,
         unsafe_allow_html=True,
     )
 
-    # Create timer options
-    time_limit = st.slider("Set Timer (minutes):", 0, 120, 60)
-
-    # Add a start button
+    # Timer logic
+    st.session_state.time_limit = st.slider("Set Timer (minutes):", 0, 120, 60)
     if st.button("Start Timer"):
-        current_time = datetime.now()
+        start_timer()
 
-        # Get only the hour and minute HH:MM with no date
-        time_display = current_time.strftime("%H:%M")
+    # Where the Timer goes
+    timer_placeholder = st.empty()
+    if st.session_state.timer_running:
+        while datetime.now() < st.session_state.end_time:
+            # Calculate time remaining
+            remaining_time = str(st.session_state.end_time - datetime.now()).split(".")[
+                0
+            ]
 
-        st.write(f"Timer started at: {time_display}")
-        test = st.empty()
+            # Update the timer
+            timer_placeholder.markdown(
+                f"""
+                <p class="time">
+                    Time remaining: {remaining_time}
+                </p>
+                """,
+                unsafe_allow_html=True,
+            )
+            time.sleep(1)
+        st.session_state.timer_running = False
+        timer_placeholder.markdown(
+            "<p class='time'>Time's up!</p>", unsafe_allow_html=True
+        )
 
-        end_time = current_time + pd.Timedelta(minutes=time_limit)
-
-        async def watch(test):
-            while True:
-                test.markdown(
-                    f"""
-                    <p class="time">
-                        Time remaining: {str(end_time - datetime.now()).split('.')[0]}
-                    </p>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                r = await asyncio.sleep(1)
-
-        asyncio.run(watch(test))
+        display_final_tallies()

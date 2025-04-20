@@ -1,4 +1,6 @@
 # Imports
+
+# Imports
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -98,6 +100,15 @@ col1, col2 = st.columns([3, 1])
 
 # Main col
 with col1:
+
+    # Title
+    st.title("Athlete Name Game")
+
+    # Instructions
+    st.write(
+        "Enter the names of as many athletes as you can in the text box below. At the end of the time limit, you will see a summary of your entered athletes and their leagues. Verified leagues can be NFL, NBA, MLB, and WNBA. Other leagues will be marked as 'Unverified'. Good luck!"
+    )
+
     # Display entered athletes as a numbered list
     st.write("### Entered Athletes:")
     for i, athlete in enumerate(st.session_state.athletes, start=1):
